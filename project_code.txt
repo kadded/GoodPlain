@@ -1,0 +1,1054 @@
+﻿===== C:\Users\kaded\AndroidStudioProjects\goodplain\.gradle =====
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\data\dao\HabitDao.kt =====
+package com.goodplan.app.data.dao
+
+import androidx.room.*
+import com.goodplan.app.data.entity.Habit
+import com.goodplan.app.data.entity.HabitEntry
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface HabitDao {
+    @Query("SELECT * FROM habits ORDER BY position ASC")
+    fun getAllHabits(): Flow<List<Habit>>
+
+    @Insert
+    suspend fun insertHabit(habit: Habit): Long
+
+    @Update
+    suspend fun updateHabit(habit: Habit)
+
+    @Delete
+    suspend fun deleteHabit(habit: Habit)
+
+    @Query("SELECT * FROM habit_entries WHERE habitId = :habitId AND date BETWEEN :from AND :to")
+    fun getEntries(habitId: Long, from: String, to: String): Flow<List<HabitEntry>>
+
+    @Query("SELECT * FROM habit_entries WHERE date BETWEEN :from AND :to")
+    fun getAllEntriesInRange(from: String, to: String): Flow<List<HabitEntry>>
+
+    @Upsert
+    suspend fun upsertEntry(entry: HabitEntry)
+
+    @Query("DELETE FROM habit_entries WHERE habitId = :habitId AND date = :date")
+    suspend fun deleteEntry(habitId: Long, date: String)
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\data\dao\WeekDao.kt =====
+package com.goodplan.app.data.dao
+
+import androidx.room.*
+import com.goodplan.app.data.entity.Task
+import com.goodplan.app.data.entity.WeekGoal
+import com.goodplan.app.data.entity.WeekNote
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface WeekDao {
+    @Query("SELECT * FROM week_goals WHERE weekStart = :weekStart LIMIT 1")
+    fun getWeekGoal(weekStart: String): Flow<WeekGoal?>
+
+    @Upsert
+    suspend fun upsertWeekGoal(goal: WeekGoal)
+
+    @Query("SELECT * FROM tasks WHERE date = :date ORDER BY position ASC")
+    fun getTasksForDate(date: String): Flow<List<Task>>
+
+    @Query("SELECT * FROM tasks WHERE date BETWEEN :from AND :to ORDER BY date ASC, position ASC")
+    fun getTasksForWeek(from: String, to: String): Flow<List<Task>>
+
+    @Insert
+    suspend fun insertTask(task: Task): Long
+
+    @Update
+    suspend fun updateTask(task: Task)
+
+    @Delete
+    suspend fun deleteTask(task: Task)
+
+    @Query("DELETE FROM tasks WHERE date = :date")
+    suspend fun deleteTasksForDate(date: String)
+
+    @Query("SELECT * FROM week_notes WHERE date = :date LIMIT 1")
+    fun getNote(date: String): Flow<WeekNote?>
+
+    @Upsert
+    suspend fun upsertNote(note: WeekNote)
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\data\entity\Entities.kt =====
+package com.goodplan.app.data.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "week_goals")
+data class WeekGoal(
+    @PrimaryKey val weekStart: String, // yyyy-MM-dd (РїРѕРЅРµРґРµР»СЊРЅРёРє)
+    val goal1: String = "",
+    val goal2: String = "",
+    val goal3: String = "",
+    val mainResult: String = ""
+)
+
+@Entity(tableName = "tasks")
+data class Task(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: String,          // yyyy-MM-dd
+    val text: String,
+    val isCompleted: Boolean = false,
+    val position: Int
+)
+
+@Entity(tableName = "week_notes")
+data class WeekNote(
+    @PrimaryKey val date: String, // yyyy-MM-dd
+    val text: String = ""
+)
+
+@Entity(tableName = "habits")
+data class Habit(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val position: Int
+)
+
+@Entity(tableName = "habit_entries")
+data class HabitEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val habitId: Long,
+    val date: String, // yyyy-MM-dd
+    val completed: Boolean = false
+)
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\data\AppDatabase.kt =====
+package com.goodplan.app.data
+
+import androidx.room.Database
+import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
+import com.goodplan.app.data.dao.HabitDao
+import com.goodplan.app.data.dao.WeekDao
+import com.goodplan.app.data.entity.*
+
+@Database(
+    entities = [WeekGoal::class, Task::class, WeekNote::class, Habit::class, HabitEntry::class],
+    version = 1,
+    exportSchema = false
+)
+@TypeConverters(Converters::class)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun weekDao(): WeekDao
+    abstract fun habitDao(): HabitDao
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\data\Converters.kt =====
+package com.goodplan.app.data
+
+import androidx.room.TypeConverter
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+class Converters {
+    private val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+
+    @TypeConverter
+    fun fromDate(date: LocalDate): String = date.format(fmt)
+
+    @TypeConverter
+    fun toDate(value: String): LocalDate = LocalDate.parse(value, fmt)
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\repository\AppRepository.kt =====
+package com.goodplan.app.repository
+
+import com.goodplan.app.data.AppDatabase
+import com.goodplan.app.data.entity.*
+import kotlinx.coroutines.flow.Flow
+
+class AppRepository(private val db: AppDatabase) {
+    val weekDao = db.weekDao()
+    val habitDao = db.habitDao()
+
+    fun weekGoal(weekStart: String): Flow<WeekGoal?> = weekDao.getWeekGoal(weekStart)
+    suspend fun saveWeekGoal(g: WeekGoal) = weekDao.upsertWeekGoal(g)
+
+    fun tasksForDate(date: String): Flow<List<Task>> = weekDao.getTasksForDate(date)
+    fun tasksForWeek(from: String, to: String): Flow<List<Task>> = weekDao.getTasksForWeek(from, to)
+    suspend fun addTask(t: Task): Long = weekDao.insertTask(t)
+    suspend fun updateTask(t: Task) = weekDao.updateTask(t)
+    suspend fun deleteTask(t: Task) = weekDao.deleteTask(t)
+    suspend fun clearTasksForDate(date: String) = weekDao.deleteTasksForDate(date)
+
+    fun note(date: String): Flow<WeekNote?> = weekDao.getNote(date)
+    suspend fun saveNote(n: WeekNote) = weekDao.upsertNote(n)
+
+    fun habits(): Flow<List<Habit>> = habitDao.getAllHabits()
+    suspend fun addHabit(h: Habit): Long = habitDao.insertHabit(h)
+    suspend fun updateHabit(h: Habit) = habitDao.updateHabit(h)
+    suspend fun deleteHabit(h: Habit) = habitDao.deleteHabit(h)
+
+    fun entries(habitId: Long, from: String, to: String): Flow<List<HabitEntry>> =
+        habitDao.getEntries(habitId, from, to)
+
+    fun allEntriesInRange(from: String, to: String): Flow<List<HabitEntry>> =
+        habitDao.getAllEntriesInRange(from, to)
+
+    suspend fun toggleEntry(habitId: Long, date: String, completed: Boolean) {
+        if (completed) {
+            habitDao.upsertEntry(HabitEntry(habitId = habitId, date = date, completed = true))
+        } else {
+            habitDao.deleteEntry(habitId, date)
+        }
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\ui\components\RingProgress.kt =====
+package com.goodplan.app.ui.components
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.drawBehind
+
+@Composable
+fun RingProgress(
+    progress: Float, // 0..1
+    size: Dp = 56.dp,
+    strokeWidth: Dp = 6.dp,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    progressColor: Color = MaterialTheme.colorScheme.primary,
+    label: String? = null
+) {
+    val stroke = strokeWidth
+    Box(
+        modifier = Modifier.size(size).drawBehind {
+            val sw = stroke.toPx()
+            val arcSize = Size(this.size.width - sw, this.size.height - sw)
+            val topLeft = Offset(sw / 2f, sw / 2f)
+            drawArc(
+                color = trackColor,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = sw, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = progressColor,
+                startAngle = -90f,
+                sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = sw, cap = StrokeCap.Round)
+            )
+        },
+        contentAlignment = Alignment.Center
+    ) {
+        if (label != null) {
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\ui\navigation\NavGraph.kt =====
+package com.goodplan.app.ui.navigation
+
+import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.goodplan.app.ui.screens.HabitsScreen
+import com.goodplan.app.ui.screens.InstructionScreen
+import com.goodplan.app.ui.screens.WeekScreen
+import com.goodplan.app.viewmodel.HabitsViewModel
+import com.goodplan.app.viewmodel.WeekViewModel
+
+object Routes {
+    const val WEEK = "week"
+    const val HABITS = "habits"
+    const val INSTRUCTION = "instruction"
+}
+
+@Composable
+fun NavGraph() {
+    val navController = rememberNavController()
+    NavHost(navController = navController, startDestination = Routes.WEEK) {
+        composable(Routes.WEEK) {
+            val vm: WeekViewModel = viewModel()
+            WeekScreen(vm = vm, onOpenInstruction = { navController.navigate(Routes.INSTRUCTION) })
+        }
+        composable(Routes.HABITS) {
+            val vm: HabitsViewModel = viewModel()
+            HabitsScreen(vm = vm)
+        }
+        composable(Routes.INSTRUCTION) {
+            InstructionScreen(onBack = { navController.popBackStack() })
+        }
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\ui\theme\Color.kt =====
+package com.goodplain.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Purple80 = Color(0xFFD0BCFF)
+val PurpleGrey80 = Color(0xFFCCC2DC)
+val Pink80 = Color(0xFFEFB8C8)
+
+val Purple40 = Color(0xFF6650a4)
+val PurpleGrey40 = Color(0xFF625b71)
+val Pink40 = Color(0xFF7D5260)
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\ui\theme\Theme.kt =====
+package com.goodplan.app.ui.theme
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF1F7A8C),
+    secondary = Color(0xFFF2B93B),
+    tertiary = Color(0xFF4CAF50),
+    background = Color(0xFFF7F8FA),
+    surface = Color.White
+)
+
+@Composable
+fun GoodPlanTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = LightColors,
+        typography = Typography(),
+        content = content
+    )
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\ui\theme\Type.kt =====
+package com.goodplain.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// Set of Material typography styles to start with
+val Typography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    )
+    /* Other default text styles to override
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+    */
+)
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\viewmodel\HabitsViewModel.kt =====
+package com.goodplan.app.viewmodel
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.goodplan.app.GoodPlanApp
+import com.goodplan.app.data.entity.Habit
+import com.goodplan.app.data.entity.HabitEntry
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+
+class HabitsViewModel(app: Application) : AndroidViewModel(app) {
+    private val repo = (app as GoodPlanApp).repository
+    private val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+
+    private val now = LocalDate.of(2026, 10, 14) // Р°РєС‚СѓР°Р»СЊРЅР°СЏ РґР°С‚Р°
+    private val _month = MutableStateFlow(YearMonth.of(now.year, now.monthValue))
+    val month: StateFlow<YearMonth> = _month.asStateFlow()
+
+    val daysInMonth: StateFlow<List<Int?>> = _month.map { ym ->
+        val len = ym.lengthOfMonth()
+        (1..31).map { if (it <= len) it else null }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val habits: StateFlow<List<Habit>> = repo.habits()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val entries: StateFlow<List<HabitEntry>> = _month.flatMapLatest { ym ->
+        val from = ym.atDay(1).format(fmt)
+        val to = ym.atEndOfMonth().format(fmt)
+        repo.allEntriesInRange(from, to)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun setMonth(year: Int, month: Int) {
+        _month.value = YearMonth.of(year, month.coerceIn(1, 12))
+    }
+
+    fun addHabit(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val pos = habits.value.size
+            repo.addHabit(Habit(name = name, position = pos))
+        }
+    }
+
+    fun updateHabit(h: Habit, newName: String) {
+        viewModelScope.launch { repo.updateHabit(h.copy(name = newName)) }
+    }
+
+    fun deleteHabit(h: Habit) {
+        viewModelScope.launch { repo.deleteHabit(h) }
+    }
+
+    fun toggle(habitId: Long, day: Int) {
+        val date = _month.value.atDay(day).format(fmt)
+        val exists = entries.value.any { it.habitId == habitId && it.date == date }
+        viewModelScope.launch { repo.toggleEntry(habitId, date, !exists) }
+    }
+
+    fun isCompleted(habitId: Long, day: Int): Boolean {
+        val date = _month.value.atDay(day).format(fmt)
+        return entries.value.any { it.habitId == habitId && it.date == date }
+    }
+
+    fun completionPercent(habitId: Long): Int {
+        val total = _month.value.lengthOfMonth()
+        if (total == 0) return 0
+        val done = entries.value.count { it.habitId == habitId }
+        return (done * 100 / total).coerceIn(0, 100)
+    }
+
+    fun ratingStars(percent: Int): Int = when {
+        percent >= 90 -> 5
+        percent >= 70 -> 4
+        percent >= 50 -> 3
+        percent >= 30 -> 2
+        percent > 0 -> 1
+        else -> 0
+    }
+
+    fun totalForDay(day: Int): Int {
+        val ym = _month.value
+        val date = ym.atDay(day).format(fmt)
+        return entries.value.count { it.date == date }
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\viewmodel\WeekViewModel.kt =====
+package com.goodplan.app.viewmodel
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.goodplan.app.GoodPlanApp
+import com.goodplan.app.data.entity.Task
+import com.goodplan.app.data.entity.WeekGoal
+import com.goodplan.app.data.entity.WeekNote
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
+
+class WeekViewModel(app: Application) : AndroidViewModel(app) {
+    private val repo = (app as GoodPlanApp).repository
+    private val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+
+    private val _weekStart = MutableStateFlow(currentMonday())
+    val weekStart: StateFlow<LocalDate> = _weekStart.asStateFlow()
+
+    private val _selectedDay = MutableStateFlow(LocalDate.now())
+    val selectedDay: StateFlow<LocalDate> = _selectedDay.asStateFlow()
+
+    val weekDays: StateFlow<List<LocalDate>> = _weekStart.map { start ->
+        (0..6).map { start.plusDays(it.toLong()) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val weekGoal: StateFlow<WeekGoal?> = _weekStart.flatMapLatest {
+        repo.weekGoal(it.format(fmt))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val tasksForSelected: StateFlow<List<Task>> = _selectedDay.flatMapLatest {
+        repo.tasksForDate(it.format(fmt))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val weekTasks: StateFlow<List<Task>> = _weekStart.flatMapLatest { start ->
+        repo.tasksForWeek(start.format(fmt), start.plusDays(6).format(fmt))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val noteForSelected: StateFlow<WeekNote?> = _selectedDay.flatMapLatest {
+        repo.note(it.format(fmt))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun setWeekStart(date: LocalDate) {
+        val monday = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        _weekStart.value = monday
+    }
+
+    fun selectDay(date: LocalDate) { _selectedDay.value = date }
+
+    fun saveGoals(g1: String, g2: String, g3: String, main: String) {
+        viewModelScope.launch {
+            repo.saveWeekGoal(WeekGoal(
+                weekStart = _weekStart.value.format(fmt),
+                goal1 = g1, goal2 = g2, goal3 = g3, mainResult = main
+            ))
+        }
+    }
+
+    fun addTask(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            val current = tasksForSelected.value
+            repo.addTask(Task(
+                date = _selectedDay.value.format(fmt),
+                text = text,
+                position = current.size
+            ))
+        }
+    }
+
+    fun toggleTask(task: Task) {
+        viewModelScope.launch { repo.updateTask(task.copy(isCompleted = !task.isCompleted)) }
+    }
+
+    fun deleteTask(task: Task) {
+        viewModelScope.launch { repo.deleteTask(task) }
+    }
+
+    fun saveNote(text: String) {
+        viewModelScope.launch {
+            repo.saveNote(WeekNote(date = _selectedDay.value.format(fmt), text = text))
+        }
+    }
+
+    // РђРЅР°Р»РёС‚РёРєР°
+    data class WeekStats(
+        val total: Int,
+        val done: Int,
+        val avgProgress: Float,
+        val bestDay: LocalDate?,
+        val activeDays: Int
+    )
+
+    val stats: StateFlow<WeekStats> = weekTasks.combine(weekDays) { tasks, days ->
+        val total = tasks.size
+        val done = tasks.count { it.isCompleted }
+        val perDay = days.map { d ->
+            val dayTasks = tasks.filter { it.date == d.format(fmt) }
+            if (dayTasks.isEmpty()) 0f
+            else dayTasks.count { it.isCompleted }.toFloat() / dayTasks.size
+        }
+        val avg = if (perDay.isEmpty()) 0f else perDay.average().toFloat()
+        val bestIdx = perDay.indexOf(perDay.maxOrNull() ?: 0f)
+        val bestDay = if ((perDay.maxOrNull() ?: 0f) > 0f && bestIdx >= 0) days.getOrNull(bestIdx) else null
+        val active = perDay.count { it > 0f }
+        WeekStats(total, done, avg, bestDay, active)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, WeekStats(0, 0, 0f, null, 0))
+
+    fun dayProgress(date: LocalDate): Float {
+        val tasks = weekTasks.value.filter { it.date == date.format(fmt) }
+        if (tasks.isEmpty()) return 0f
+        return tasks.count { it.isCompleted }.toFloat() / tasks.size
+    }
+
+    private fun currentMonday(): LocalDate =
+        LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\GoodPlanApp.kt =====
+package com.goodplan.app
+
+import android.app.Application
+import androidx.room.Room
+import com.goodplan.app.data.AppDatabase
+import com.goodplan.app.repository.AppRepository
+
+class GoodPlanApp : Application() {
+    lateinit var database: AppDatabase
+    lateinit var repository: AppRepository
+
+    override fun onCreate() {
+        super.onCreate()
+        database = Room.databaseBuilder(
+            applicationContext,
+            AppDatabase::class.java,
+            "goodplan.db"
+        ).fallbackToDestructiveMigration().build()
+        repository = AppRepository(database)
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\java\com\goodplain\MainActivity.kt =====
+package com.goodplain
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import com.goodplain.ui.theme.GoodplainTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            GoodplainTheme {
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    Greeting(
+                        name = "Android",
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Greeting(name: String, modifier: Modifier = Modifier) {
+    Text(
+        text = "Hello $name!",
+        modifier = modifier
+    )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun GreetingPreview() {
+    GoodplainTheme {
+        Greeting("Android")
+    }
+}
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\drawable\ic_launcher_background.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9,0L9,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,0L19,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,0L29,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,0L39,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,0L49,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,0L59,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,0L69,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,0L79,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M89,0L89,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M99,0L99,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,9L108,9"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,19L108,19"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,29L108,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,39L108,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,49L108,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,59L108,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,69L108,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,79L108,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,89L108,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,99L108,99"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,29L89,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,39L89,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,49L89,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,59L89,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,69L89,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,79L89,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,19L29,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,19L39,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,19L49,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,19L59,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,19L69,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,19L79,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+</vector>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\drawable\ic_launcher_foreground.xml =====
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="85.84757"
+                android:endY="92.4963"
+                android:startX="42.9492"
+                android:startY="49.59793"
+                android:type="linear">
+                <item
+                    android:color="#44000000"
+                    android:offset="0.0" />
+                <item
+                    android:color="#00000000"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="nonZero"
+        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+</vector>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\mipmap-anydpi-v26\ic_launcher.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\mipmap-anydpi-v26\ic_launcher_round.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\values\colors.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\values\strings.xml =====
+<resources>
+    <string name="app_name">GoodPlan</string>
+</resources>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\values\themes.xml =====
+<resources>
+    <style name="Theme.GoodPlan" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\xml\backup_rules.xml =====
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample backup rules file; uncomment and customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+   Note: This file is ignored for devices older than API 31
+   See https://developer.android.com/about/versions/12/backup-restore
+-->
+<full-backup-content>
+    <!--
+   <include domain="sharedpref" path="."/>
+   <exclude domain="sharedpref" path="device.xml"/>
+-->
+</full-backup-content>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\res\xml\data_extraction_rules.xml =====
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample data extraction rules file; uncomment and customize as necessary.
+   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   for details.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- TODO: Use <include> and <exclude> to control what is backed up.
+        <include .../>
+        <exclude .../>
+        -->
+    </cloud-backup>
+    <!--
+    <device-transfer>
+        <include .../>
+        <exclude .../>
+    </device-transfer>
+    -->
+</data-extraction-rules>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\app\src\main\AndroidManifest.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:name=".GoodPlanApp"
+        android:allowBackup="true"
+        android:label="GoodPlan"
+        android:theme="@style/Theme.GoodPlan"
+        android:supportsRtl="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.GoodPlan">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\gradle\wrapper\gradle-wrapper.properties =====
+#Wed Oct 14 18:20:40 MSK 2026
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionSha256Sum=72f44c9f8ebcb1af43838f45ee5c4aa9c5444898b3468ab3f4af7b6076c5bc3f
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.2.1-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\gradle\gradle-daemon-jvm.properties =====
+#This file is generated by updateDaemonJvm
+toolchainUrl.FREE_BSD.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.FREE_BSD.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.LINUX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.LINUX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.MAC_OS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/73bcfb608d1fde9fb62e462f834a3299/redirect
+toolchainUrl.MAC_OS.X86_64=https\://api.foojay.io/disco/v3.0/ids/846ee0d876d26a26f37aa1ce8de73224/redirect
+toolchainUrl.UNIX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.UNIX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.WINDOWS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/9482ddec596298c84656d31d16652665/redirect
+toolchainUrl.WINDOWS.X86_64=https\://api.foojay.io/disco/v3.0/ids/39701d92e1756bb2f141eb67cd4c660e/redirect
+toolchainVersion=21
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\gradle.properties =====
+# Project-wide Gradle settings.
+# IDE (e.g. Android Studio) users:
+# Gradle settings configured through the IDE *will override*
+# any settings specified in this file.
+# For more details on how to configure your build environment visit
+# http://www.gradle.org/docs/current/userguide/build_environment.html
+# Specifies the JVM arguments used for the daemon process.
+# The setting is particularly useful for tweaking memory settings.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# When configured, Gradle will run in incubating parallel mode.
+# This option should only be used with decoupled projects. For more details, visit
+# https://developer.android.com/r/tools/gradle-multi-project-decoupled-projects
+# org.gradle.parallel=true
+# AndroidX package structure to make it clearer which packages are bundled with the
+# Android operating system, and which are packaged with your app's APK
+# https://developer.android.com/topic/libraries/support-library/androidx-rn
+android.useAndroidX=true
+# Kotlin code style for this project: "official" or "obsolete":
+kotlin.code.style=official
+# Enables namespacing of each library's R class so that its R class includes only the
+# resources declared in the library itself and none from the library's dependencies,
+# thereby reducing the size of the R class for that library
+android.nonTransitiveRClass=true
+
+
+===== C:\Users\kaded\AndroidStudioProjects\goodplain\local.properties =====
+## This file is automatically generated by Android Studio.
+# Do not modify this file -- YOUR CHANGES WILL BE ERASED!
+#
+# This file should *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Location of the SDK. This is only used by Gradle.
+# For customization when using a Version Control System, please read the
+# header note.
+sdk.dir=C\:\\Users\\kaded\\AppData\\Local\\Android\\Sdk
+
+
